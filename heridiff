@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+
+#
+# I'd like to see the following usage:
+#  heridiff [OPTIONS] dir1 dir2 [find options] -- [diff_options]
+#   ex: heridiff dir1 dir2 -name '*.cpp' -o -name '*.h' -- -ub
+#  heridiff [OPTIONS] dir1 dir2 [diff_options]
+#
+#  heridiff [OPTIONS] dir1 dir2 [find options] -- [diff_options]
+
+set -e
+export LC_ALL=C
+
+usage(){
+    cat 1>&2 <<'EOF'
+usage: heridiff [HD_OPT] dir1 dir2
+HG_OPTS:
+      -h        display this screen
+      -o        print only names of files
+      -c        print common files
+Example: heridiff
+EOF
+}
+
+while getopts chi:o f; do
+    case "$f" in
+	'?')
+	    exit 1;;
+	h)
+	    usage
+	    exit 0;;
+	o)
+	    print_only_names=1;;
+	c)
+	    print_only_names=1
+	    print_common_files=1;;
+	1) 
+	    comm_opts1="1";;
+	2) 
+	    comm_opts2="2";;
+	3) 
+	    comm_opts3="3";;
+    esac
+done
+shift `expr $OPTIND - 1`
+# 1) it's always better to use find(1) instead of ls(1) for
+# searching for files.
+# 2) please use double quote for $dir_1 and similar.
+# Remember! Filename can contains spaces.
+
+if test $# -lt 2; then 
+    echo "has no enough args"; 
+    exit 1; 
+fi
+
+dir1="$1"; shift
+dir2="$1"; shift
+dir1_shq=`printf '%q' "$dir1"`
+dir2_shq=`printf '%q' "$dir2"`
+#find_cmd="find $dir1_shq $dir2_shq '(' $find_opts ')' -type f -print0"
+
+while test $# -gt 0; do
+   if test "$1" = '--'; then
+	shift
+	break
+   fi
+   shq=`printf '%q' "$1"`
+   find_opts="$find_opts $shq"
+   shift
+done
+
+tmpdir=`mktemp -d /tmp/heridiff.XXXXXX`
+test -n "$tmpdir" || exit 1
+
+files1="$tmpdir/files1"
+files2="$tmpdir/files2"
+
+#"$@" - diff options
+if test -n "$find_opts"; then 
+    find_opts="-type f '(' $find_opts ')'"; 
+else 
+    find_opts='-type f'; 
+fi
+
+find_cmd="find . $find_opts"
+( cd "$dir1"; eval "$find_cmd"; ) | sort > "$files1"
+
+find_cmd2="find . $find_opts"
+( cd "$dir2"; eval "$find_cmd"; ) | sort > "$files2"
+#cat $files2
+
+
+#################
+
+#!!!!! support for missing options -o and -c !!!!!
+
+files_uniq_1="$tmpdir/files_uniq_1"
+files_uniq_2="$tmpdir/files_uniq_2"
+common_files="$tmpdir/common_files"
+
+comm -23 "$files1" "$files2" > "$files_uniq_1"
+comm -13 "$files1" "$files2" > "$files_uniq_2"
+comm -12 "$files1" "$files2" > "$common_files"
+
+if test -z "$comm_opts1"; then
+    echo "Files existing only in $dir1:"
+    cat "$files_uniq_1"
+    printf "\n"
+fi
+if test -z "$comm_opts2"; then
+    echo "Files existing only in $dir2:"
+    cat "$files_uniq_2"
+    printf "\n"
+fi
+if test -z "$comm_opts3"; then
+    echo "Common files:"
+    cat "$common_files"
+    printf "\n"
+fi
+if test -z "$print_only_names"; then
+    while read fn; do
+	file1_shq=`printf '%q' "$dir1_shq/$fn"`
+	file2_shq=`printf '%q' "$dir2_shq/$fn"`
+#diff_comm="diff $@ $file1_shq $file2_shq"
+	echo "File $fn..."
+	printf "\n"
+	diff_cmd="diff $@ $file1_shq $file2_shq"
+	eval "$diff_cmd"
+    done < "$common_files"
+fi
+
